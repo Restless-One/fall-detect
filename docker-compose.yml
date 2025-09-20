@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  backend:
+    build: .
+    image: fall-detect:dev
+    container_name: fall-detect
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+    environment:
+
+      STORAGE_DIR: /app/storage
+      MODEL_PATH: best.pt
+      CONF_TH: "0.5"
+      IMG_SIZE: "640"
+      WINDOW: "10"
+      K_FALLEN: "6"
+      K_STANDING: "6"
+      NO_STAND_TIMEOUT_S: "20"
+      MAX_RECENT_EVENTS: "100"

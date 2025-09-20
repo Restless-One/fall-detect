@@ -1,0 +1,43 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pkl
+*.so
+*.egg
+*.egg-info/
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- IDE / Editor ---
+.idea/
+.vscode/
+*.iml
+
+# --- OS / Temp files ---
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.tmp
+
+# --- Build / Dist ---
+build/
+dist/
+*.spec
+
+# --- Data / Outputs ---
+storage/
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.json
+
+# --- Docker ---
+*.tar

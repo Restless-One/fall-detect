@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Fall Detect Demo Frontend</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input[type=file] { padding: 6px; }
+    button { padding: 8px 14px; border: 1px solid #333; border-radius: 10px; cursor: pointer; background: #111; color: #fff; }
+    button.secondary { background: #fafafa; color:#333; border-color:#ccc; }
+    #log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; background:#fafafa; border-radius:10px; padding:12px; max-height: 300px; overflow:auto; }
+    .kv { font-size: 14px; color: #444; }
+    .pill { display:inline-block; padding:2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid #ccc; background:#fff; }
+    #toastContainer { position: fixed; top: 16px; right: 16px; z-index: 9999; display:flex; flex-direction: column; gap: 8px; }
+    .toast { background:#111; color:#fff; padding:10px 14px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,.2); font-size:14px; max-width: 320px; word-break: break-word; opacity: 0.98; }
+    .toast.info { background:#111; }
+    .toast.warn { background:#a15600; }
+    .toast.error { background:#9c1a1a; }
+  </style>
+</head>
+<body>
+  <div id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+  <h1>Fall Detect Demo — Upload Video & Live Alerts</h1>
+
+  <div class="card">
+    <div class="row">
+      <label for="file">Select video:</label>
+      <input id="file" type="file" accept="video/*" />
+      <button id="uploadBtn">Upload & Start</button>
+      <button id="stopBtn" class="secondary">Stop Event Stream</button>
+      <button id="renderBtn" class="secondary">Render Annotated Video</button>
+    </div>
+    <p class="kv">Backend URL: <code id="baseUrlLabel"></code></p>
+    <p class="kv">Video ID: <span id="vid" class="pill">—</span></p>
+    <p class="kv">Status: <span id="status" class="pill">idle</span></p>
+  </div>
+
+  <div class="card">
+    <strong>Event Log</strong>
+    <div id="log"></div>
+  </div>
+
+  <div class="card" id="previewCard" style="display:none;">
+    <strong>Annotated Preview</strong>
+    <div style="margin-top:8px;">
+      <video id="player" controls style="width:100%; max-height:420px; background:#000;"></video>
+    </div>
+    <p class="kv" style="margin-top:8px;">Download: <a id="annotatedLink" href="#" target="_blank" rel="noopener">—</a></p>
+  </div>
+
+<script>
+(() => {
+  const APP_VER = 'frontend-2025-09-20-02';
+  console.log('Fall Detect Frontend version:', APP_VER);
+
+  const DEFAULT_BASE = (location.origin && location.origin !== 'null' ? location.origin : 'http://127.0.0.1:8000');
+  const BASE_URL = localStorage.getItem('fall_backend_url') || DEFAULT_BASE;
+  document.getElementById("baseUrlLabel").textContent = BASE_URL;
+
+  const fileInput = document.getElementById('file');
+  const uploadBtn = document.getElementById('uploadBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const vidEl = document.getElementById('vid');
+  const statusEl = document.getElementById('status');
+  const logEl = document.getElementById('log');
+  const renderBtn = document.getElementById('renderBtn');
+  const previewCard = document.getElementById('previewCard');
+  const player = document.getElementById('player');
+  const annotatedLink = document.getElementById('annotatedLink');
+
+  function logLine(obj) {
+    const line = typeof obj === 'string' ? obj : JSON.stringify(obj);
+    logEl.textContent += line + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  logLine('Frontend boot: ' + APP_VER);
+
+  const toastContainer = document.getElementById('toastContainer');
+  function notify(msg, level = 'info', ttlMs = 6000) {
+    try {
+      console.log('notify:', level, msg);
+      const el = document.createElement('div');
+      el.className = `toast ${level}`;
+      el.textContent = msg;
+      toastContainer.appendChild(el);
+      setTimeout(() => {
+        el.style.transition = 'opacity .3s ease';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 320);
+      }, ttlMs);
+    } catch (e) {
+      // Fallback to blocking alert if something goes wrong
+      alert(msg);
+    }
+  }
+
+
+  window.addEventListener('error', (e) => {
+    logLine('JS Error: ' + (e.message || 'unknown'));
+  });
+
+
+  (async () => {
+    try {
+      const res = await fetch(BASE_URL.replace(/\/$/, '') + '/health');
+      if (res.ok) {
+        const h = await res.json();
+        logLine('Health check: ' + JSON.stringify(h));
+      } else {
+        logLine('Health check failed: ' + res.status);
+      }
+    } catch (e) {
+      logLine('Cannot reach backend: ' + (e.message || e));
+    }
+  })();
+
+
+  const bar = document.querySelector('.row');
+  const muteCb = document.createElement('label');
+  muteCb.innerHTML = `<input id="mute" type="checkbox" /> Mute alerts`;
+  const replayCb = document.createElement('label');
+  replayCb.style.marginLeft = '8px';
+  replayCb.innerHTML = `<input id="replay" type="checkbox" /> Replay history`;
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear Log';
+  clearBtn.className = 'secondary';
+  clearBtn.style.marginLeft = '8px';
+  bar.appendChild(muteCb);
+  bar.appendChild(replayCb);
+  bar.appendChild(clearBtn);
+
+  const mute = document.getElementById('mute');
+  const replay = document.getElementById('replay');
+
+  let es = null;
+  const seen = new Set();
+
+  function setStatus(s) { statusEl.textContent = s; }
+
+  function toAbsoluteUrl(p) {
+    if (!p) return '';
+    if (/^https?:\/\//i.test(p)) return p;
+    const base = BASE_URL.replace(/\/$/, '');
+    if (p.startsWith('/')) return base + p;
+    return base + '/' + p;
+  }
+
+  function showAnnotated(url) {
+    const abs = toAbsoluteUrl(url);
+    annotatedLink.textContent = abs;
+    annotatedLink.href = abs;
+    player.src = abs;
+    previewCard.style.display = '';
+  }
+
+  function startSSE(videoId) {
+    if (es) es.close();
+    seen.clear();
+    logEl.textContent = "";
+    const qs = new URLSearchParams({
+      video_id: videoId,
+      replay: String(replay.checked)
+    });
+    es = new EventSource(`${BASE_URL.replace(/\/$/, '')}/events/stream?${qs.toString()}`);
+
+    es.onmessage = (ev) => {
+      try {
+        const evt = JSON.parse(ev.data);
+        logLine({debug:"onmessage", rawType: evt.type, id: evt.event_id});
+        const key = evt.event_id || `${evt.type}-${typeof evt.frame !== 'undefined' ? evt.frame : Math.random().toString(36).slice(2)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        logLine(evt);
+        if (evt.type === "FALL_DETECTED") {
+          setStatus("falling");
+        } else if (evt.type === "RECOVERED") {
+          setStatus("recovered");
+        } else if (evt.type === "NO_STAND_TIMEOUT") {
+          setStatus("timeout");
+        } else if (evt.type === "VIDEO_ENDED_NO_RECOVERY") {
+          setStatus("ended_no_recovery");
+        }
+
+        // Debug: record intent to notify
+        logLine({debug:"notify_check", type: evt.type, ts: evt.ts, hr: evt.rppg_heart_rate_bpm});
+
+
+        if (!mute.checked && ["FALL_DETECTED","RECOVERED","NO_STAND_TIMEOUT","VIDEO_ENDED_NO_RECOVERY"].includes(evt.type)) {
+          let msg = `[${evt.type}] ${evt.ts || ""}`;
+          if (evt.type === "FALL_DETECTED") {
+            // First report (fall detected)
+            if (typeof evt.max_frame_score !== "undefined") msg += ` • score=${evt.max_frame_score}`;
+          } else if (evt.type === "RECOVERED") {
+            // Second report (recovered)
+            if (typeof evt.fall_duration_sec !== "undefined") msg += ` • duration=${evt.fall_duration_sec}s`;
+            if (typeof evt.rppg_heart_rate_bpm !== "undefined") msg += ` • HR=${evt.rppg_heart_rate_bpm}`;
+          } else if (evt.type === "NO_STAND_TIMEOUT") {
+            if (typeof evt.elapsed_sec !== "undefined") msg += ` • elapsed=${evt.elapsed_sec}s`;
+            if (typeof evt.rppg_heart_rate_bpm !== "undefined") msg += ` • HR=${evt.rppg_heart_rate_bpm}`;
+          } else if (evt.type === "VIDEO_ENDED_NO_RECOVERY") {
+            if (typeof evt.elapsed_sec !== "undefined") msg += ` • elapsed=${evt.elapsed_sec}s`;
+            if (typeof evt.rppg_heart_rate_bpm !== "undefined") msg += ` • HR=${evt.rppg_heart_rate_bpm}`;
+          }
+          notify(msg, evt.type === "FALL_DETECTED" ? "warn" : "info");
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    es.onerror = async (e) => {
+      logLine("SSE error: backend not running or network blocked");
+    };
+  }
+
+  async function upload() {
+    const file = (fileInput.files && fileInput.files[0]) || null;
+    if (!file) {
+      alert("Please choose a video file first");
+      return;
+    }
+    setStatus("uploading...");
+    logLine(`Uploading: ${file.name}`);
+
+    const fd = new FormData();
+    fd.append("file", file);
+
+    try {
+      const resp = await fetch(`${BASE_URL.replace(/\/$/, '')}/videos`, { method: "POST", body: fd });
+      if (!resp.ok) {
+        const t = await resp.text();
+        throw new Error(`Upload failed: ${resp.status} ${t}`);
+      }
+      const data = await resp.json();
+      const videoId = data.video_id;
+      vidEl.textContent = videoId;
+      setStatus("running");
+      logLine(`Upload success, video_id=${videoId}. Subscribing to events...`);
+      startSSE(videoId);
+
+      previewCard.style.display = 'none';
+      player.removeAttribute('src');
+      annotatedLink.textContent = '—';
+      annotatedLink.removeAttribute('href');
+
+      pollStatus(videoId);
+    } catch (err) {
+      console.error(err);
+      alert(err.message || err);
+      setStatus("error");
+      logLine(err.message || String(err));
+    }
+  }
+
+  async function renderAnnotated() {
+    const id = vidEl.textContent && vidEl.textContent.trim();
+    if (!id || id === '—') {
+      alert('No video ID. Upload a video first.');
+      return;
+    }
+    renderBtn.disabled = true;
+    renderBtn.textContent = 'Rendering...';
+    try {
+      const resp = await fetch(`${BASE_URL.replace(/\/$/, '')}/videos/${encodeURIComponent(id)}/render`, { method: 'POST' });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || JSON.stringify(data));
+      if (data.annotated_url) {
+        logLine(`Annotated video: ${data.annotated_url}`);
+        showAnnotated(data.annotated_url);
+      } else {
+        logLine('Render finished but no annotated_url returned.');
+      }
+    } catch (e) {
+      alert(e.message || String(e));
+      logLine(e.message || String(e));
+    } finally {
+      renderBtn.disabled = false;
+      renderBtn.textContent = 'Render Annotated Video';
+    }
+  }
+
+  async function pollStatus(videoId) {
+    const tick = async () => {
+      try {
+        const resp = await fetch(`${BASE_URL.replace(/\/$/, '')}/videos/${encodeURIComponent(videoId)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setStatus(data.status);
+        if (data.status === "finished" || data.status === "failed") {
+          logLine(`Task ended: ${data.status}`);
+          if (es) es.close();
+          if (data.annotated_url) {
+            logLine(`Annotated video: ${data.annotated_url}`);
+            showAnnotated(data.annotated_url);
+          }
+        } else {
+          setTimeout(tick, 1500);
+        }
+      } catch {
+        setTimeout(tick, 2000);
+      }
+    };
+    tick();
+  }
+
+  uploadBtn.addEventListener('click', upload);
+  stopBtn.addEventListener('click', () => {
+    if (es) es.close();
+    setStatus("stopped");
+    logLine("Stopped SSE subscription");
+  });
+  renderBtn.addEventListener('click', renderAnnotated);
+  clearBtn.addEventListener('click', () => {
+    logEl.textContent = "";
+    seen.clear();
+  });
+
+  document.getElementById('baseUrlLabel').ondblclick = async () => {
+    const u = prompt("Backend URL (with scheme and port)", BASE_URL);
+    if (u) {
+      localStorage.setItem("fall_backend_url", u);
+      location.reload();
+    }
+  };
+})();
+</script>
+</body>
+</html>
