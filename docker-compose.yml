@@ -11,6 +11,7 @@ services:
       - ./storage:/app/storage
     environment:
 
+      PORT: "8000"
       STORAGE_DIR: /app/storage
       MODEL_PATH: best.pt
       CONF_TH: "0.5"

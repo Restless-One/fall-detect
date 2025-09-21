@@ -19,7 +19,7 @@ COPY . /app
 
 ENV PYTHONUNBUFFERED=1 \
     HOST=0.0.0.0 \
-    PORT=8000 \
+    PORT=8080 \
     STORAGE_DIR=/app/storage \
     MODEL_PATH=best.pt \
     CONF_TH=0.5 \
@@ -34,7 +34,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN mkdir -p /app/storage
 
 
-EXPOSE 8000
+EXPOSE 8080
 
 
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --proxy-headers --forwarded-allow-ips '*' "]
