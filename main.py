@@ -511,12 +511,21 @@ def _render_annotated_mp4(video_id: str) -> dict:
     frames_meta = {int(it.get("frame", -1)): it for it in meta.get("frames", []) if int(it.get("frame", -1)) >= 0}
 
     frame_idx = -1
+    # Heartbeat text control
+    last_hr_update = -1
+    hr_text = f"HR: {dummy_hr()} bpm"
+
+
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
             frame_idx += 1
+            current_time_sec = frame_idx / fps
+            if int(current_time_sec) != last_hr_update:
+                last_hr_update = int(current_time_sec)
+                hr_text = f"HR: {dummy_hr()} bpm"
 
             dat = frames_meta.get(frame_idx)
             if dat and dat.get("boxes"):
@@ -525,7 +534,27 @@ def _render_annotated_mp4(video_id: str) -> dict:
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     label = f"{b.get('label','')}: {b.get('score',0):.2f}"
                     y_text = max(0, y1 - 8)
-                    cv2.putText(frame, label, (x1, y_text), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
+
+                    # Common text styling
+                    _font = cv2.FONT_HERSHEY_SIMPLEX
+                    _scale = 0.5
+                    _th = 1
+
+                    # Draw main label (FALLEN + score)
+                    cv2.putText(frame, label, (x1, y_text), _font, _scale, (0, 255, 0), _th, cv2.LINE_AA)
+
+                    # Place heartbeat text right after the label on the same baseline
+                    label_size, _ = cv2.getTextSize(label, _font, _scale, _th)
+                    hr_size, _ = cv2.getTextSize(hr_text, _font, _scale, _th)
+                    hr_x = x1 + label_size[0] + 8  # 8px gap after label
+                    hr_y = y_text
+
+                    # If overflowing frame width, drop it just below the label as a fallback
+                    if hr_x + hr_size[0] > width - 4:
+                        hr_x = x1
+                        hr_y = min(height - 4, y_text + 14)
+
+                    cv2.putText(frame, hr_text, (hr_x, hr_y), _font, _scale, (0, 0, 255), _th, cv2.LINE_AA)
 
             writer.write(frame)
     finally:
